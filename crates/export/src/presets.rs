@@ -5,7 +5,7 @@
 use filmcraft_time::FrameRate;
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{AudioCodec, AudioSettings, BitrateMode, MxfVideoCodec, Scaling};
+use crate::settings::{AudioCodec, AudioSettings, BitrateMode, ExportEffects, LoudnessNormalization, MxfVideoCodec, Scaling};
 use crate::{ExportSettings, Format};
 
 /// A named set of export settings (`path` and `range` are left empty).
@@ -41,9 +41,21 @@ fn h264(size: Option<(u32, u32)>, kbps: u32, max_kbps: u32) -> ExportSettings {
         bitrate_kbps: kbps,
         max_bitrate_kbps: Some(max_kbps),
         bitrate_mode: BitrateMode::Vbr1Pass,
-        audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16 },
+        audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16, ..Default::default() },
         ..Default::default()
     }
+}
+
+/// Integrated loudness of the short-form presets: the level the video platforms play speech and
+/// music at, so they neither turn the export down nor squash it.
+pub const SHORT_FORM_LUFS: f64 = -14.0;
+/// True-peak ceiling of the short-form presets, headroom for the platforms' own AAC encode.
+pub const SHORT_FORM_PEAK_DBTP: f64 = -1.0;
+
+/// H.264 1080×1920 (9:16) at the sequence's frame rate, scaled to fill, loudness normalized.
+fn short_form(kbps: u32, max_kbps: u32) -> ExportSettings {
+    let loudness = LoudnessNormalization { enabled: true, target_lufs: SHORT_FORM_LUFS, true_peak_dbtp: SHORT_FORM_PEAK_DBTP };
+    ExportSettings { scaling: Scaling::ScaleToFill, effects: ExportEffects { loudness, ..Default::default() }, ..h264(Some((1080, 1920)), kbps, max_kbps) }
 }
 
 fn adaptive(bpp: f32) -> ExportSettings {
@@ -53,7 +65,7 @@ fn adaptive(bpp: f32) -> ExportSettings {
 fn mov(format: Format, profile: &str) -> ExportSettings {
     let mut s = ExportSettings {
         format,
-        audio: AudioSettings { codec: AudioCodec::Pcm, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 24 },
+        audio: AudioSettings { codec: AudioCodec::Pcm, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 24, ..Default::default() },
         render_at_max_depth: true,
         ..Default::default()
     };
@@ -82,7 +94,7 @@ fn mxf(format: Format, codec: MxfVideoCodec, profile: &str) -> ExportSettings {
 fn audio_only(format: Format, bits: u16) -> ExportSettings {
     ExportSettings {
         format,
-        audio: AudioSettings { codec: AudioCodec::Pcm, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 0, bits },
+        audio: AudioSettings { codec: AudioCodec::Pcm, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 0, bits, ..Default::default() },
         ..Default::default()
     }
 }
@@ -118,6 +130,19 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
             ExportSettings { bitrate_mode: BitrateMode::Vbr2Pass, ..h264(Some((3840, 2160)), 50_000, 65_000) },
         ),
         p("Social Vertical 1080×1920", web, "H.264 9:16 portrait for short-form social video, scaled to fill, 12 Mbps", vertical),
+        p("TikTok 1080×1920", web, "H.264 9:16 portrait, scaled to fill, VBR 1 pass, 10 Mbps, loudness normalized to −14 LUFS", short_form(10_000, 12_000)),
+        p(
+            "Instagram Reels 1080×1920",
+            web,
+            "H.264 9:16 portrait, scaled to fill, VBR 1 pass, 8 Mbps, loudness normalized to −14 LUFS",
+            short_form(8_000, 10_000),
+        ),
+        p(
+            "YouTube Shorts 1080×1920",
+            web,
+            "H.264 9:16 portrait, scaled to fill, VBR 1 pass, 12 Mbps, loudness normalized to −14 LUFS",
+            short_form(12_000, 16_000),
+        ),
         p("Apple ProRes 422 HQ", bc, "QuickTime, ProRes 422 HQ, 24-bit 48 kHz PCM", mov(Format::ProRes, "hq")),
         p("Apple ProRes 422", bc, "QuickTime, ProRes 422, 24-bit 48 kHz PCM", mov(Format::ProRes, "standard")),
         p("Apple ProRes 422 LT", bc, "QuickTime, ProRes 422 LT, 24-bit 48 kHz PCM", mov(Format::ProRes, "lt")),
@@ -181,10 +206,11 @@ pub fn builtin_presets() -> Vec<ExportPreset> {
             "MPEG-4 audio (.m4a), stereo 48 kHz AAC-LC at 320 kbps",
             ExportSettings {
                 format: Format::Aac,
-                audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16 },
+                audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16, ..Default::default() },
                 ..Default::default()
             },
         ),
+        p("FLAC 48 kHz 24-bit", "Audio Only", "FLAC, stereo 48 kHz 24-bit, lossless", audio_only(Format::Flac, 24)),
     ]
 }
 
